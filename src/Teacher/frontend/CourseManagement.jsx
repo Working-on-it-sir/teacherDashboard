@@ -7,19 +7,20 @@ function CourseManagement() {
   const [tutor, setTutor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [courses, setCourses] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [formData, setFormData] = useState({
-    courseName: '',
+    subjectName: '',
     experienceYears: '',
-    experience: '',
+    description: '',
     language: '',
-    courseVideo: null
+    video: null
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   // Add new state for editing
-  const [editingCourse, setEditingCourse] = useState(null);
+  const [editingSubject, setEditingSubject] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [courseToDelete, setCourseToDelete] = useState(null);
+  const [subjectToDelete, setSubjectToDelete] = useState(null);
   
   const navigate = useNavigate();
   
@@ -36,22 +37,29 @@ function CourseManagement() {
     setTutor(parsedTutorInfo);
     setLoading(false);
     
-    // Fetch courses for this tutor
-    fetchCourses(parsedTutorInfo._id);
+    // Fetch subjects for this tutor
+    fetchSubjects(parsedTutorInfo._id);
   }, [navigate]);
   
-  const fetchCourses = async (tutorId) => {
+  const fetchSubjects = async (tutorId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/courses/tutor/${tutorId}`);
-      const data = await response.json();
+      // First get the teacher data to find their subjects
+      const teacherResponse = await fetch(`http://localhost:5000/api/teachers`);
+      const teachers = await teacherResponse.json();
       
-      if (response.ok) {
-        setCourses(data);
-      } else {
-        console.error('Failed to fetch courses');
+      if (!teacherResponse.ok) {
+        console.error('Failed to fetch teacher data');
+        return;
+      }
+      
+      // For demonstration purposes, get the first teacher
+      // In a real app, match the tutor ID to a teacher ID
+      if (teachers && teachers.length > 0) {
+        const teacherData = teachers[0];
+        setSubjects(teacherData.subjects || []);
       }
     } catch (err) {
-      console.error('Error fetching courses:', err);
+      console.error('Error fetching subjects:', err);
     }
   };
   
@@ -64,6 +72,12 @@ function CourseManagement() {
     }
   };
   
+  const handleMultipleLanguages = (e) => {
+    // Split comma-separated languages into an array
+    const languagesArray = e.target.value.split(',').map(lang => lang.trim());
+    setFormData({ ...formData, language: languagesArray });
+  };
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -71,128 +85,177 @@ function CourseManagement() {
     
     try {
       // If we're editing, use update logic instead
-      if (editingCourse) {
-        return handleUpdateCourse(e);
+      if (editingSubject) {
+        return handleUpdateSubject(e);
       }
       
-      if (!formData.courseVideo) {
-        setError('Please upload a course video');
+      if (!formData.video) {
+        setError('Please upload a video for this subject');
         return;
       }
       
-      const courseData = new FormData();
-      courseData.append('tutorId', tutor._id);
-      courseData.append('courseName', formData.courseName);
-      courseData.append('experienceYears', formData.experienceYears);
-      courseData.append('experience', formData.experience);
-      courseData.append('language', formData.language);
-      courseData.append('courseVideo', formData.courseVideo);
+      const subjectData = new FormData();
+      if (tutor) {
+        subjectData.append('tutorId', tutor._id);
+        subjectData.append('subjectName', formData.subjectName);
+        subjectData.append('experienceYears', formData.experienceYears);
+        subjectData.append('description', formData.description);
+        
+        // Handle language as an array
+        if (Array.isArray(formData.language)) {
+          formData.language.forEach(lang => {
+            subjectData.append('language', lang);
+          });
+        } else {
+          subjectData.append('language', formData.language);
+        }
+        
+        subjectData.append('video', formData.video);
+      }
       
-      const response = await fetch('http://localhost:5000/api/courses/add', {
+      const response = await fetch('http://localhost:5000/api/subjects/add', {
         method: 'POST',
-        body: courseData
+        body: subjectData
       });
       
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to add course');
+        throw new Error(data.message || 'Failed to add subject');
       }
       
-      setSuccess('Course added successfully!');
+      setSuccess('Subject added successfully!');
       
       // Reset form
       resetForm();
       
-      // Refresh courses
-      fetchCourses(tutor._id);
+      // Refresh subjects
+      fetchSubjects(tutor._id);
     } catch (err) {
       setError(err.message || 'Something went wrong');
       console.error('Error:', err);
     }
   };
   
-  // New function to reset the form
+  // Reset the form
   const resetForm = () => {
     setFormData({
-      courseName: '',
+      subjectName: '',
       experienceYears: '',
-      experience: '',
+      description: '',
       language: '',
-      courseVideo: null
+      video: null
     });
-    setEditingCourse(null);
+    setEditingSubject(null);
   };
   
-  // New function to handle edit button click
-  const handleEditClick = (course) => {
-    setEditingCourse(course);
+  // Handle edit button click
+  const handleEditClick = (subject, index) => {
+    setEditingSubject({...subject, index});
     setFormData({
-      courseName: course.courseName,
-      experienceYears: course.experienceYears || '',
-      experience: course.experience,
-      language: course.language,
-      courseVideo: null // We can't populate the file input, but we'll handle this conditionally
+      subjectName: subject.subject,
+      experienceYears: '', // This field isn't in the subject model
+      description: subject.description || '',
+      language: Array.isArray(subject.language) ? subject.language.join(', ') : subject.language,
+      video: null // We can't populate the file input, but we'll handle this conditionally
     });
     
     // Scroll to the form
     document.querySelector('.add-course').scrollIntoView({ behavior: 'smooth' });
   };
   
-  // New function to update a course
-  const handleUpdateCourse = async (e) => {
+  // Update a subject
+  const handleUpdateSubject = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
     
     try {
-      const courseData = new FormData();
-      courseData.append('courseName', formData.courseName);
-      courseData.append('experienceYears', formData.experienceYears);
-      courseData.append('experience', formData.experience);
-      courseData.append('language', formData.language);
-      
-      // Only append video if a new one is selected
-      if (formData.courseVideo) {
-        courseData.append('courseVideo', formData.courseVideo);
+      if (!tutor) {
+        throw new Error('Tutor information not found');
       }
       
-      const response = await fetch(`http://localhost:5000/api/courses/update/${editingCourse._id}`, {
+      const subjectData = new FormData();
+      subjectData.append('subjectName', formData.subjectName);
+      subjectData.append('description', formData.description);
+      
+      // Handle language as an array
+      if (Array.isArray(formData.language)) {
+        formData.language.forEach(lang => {
+          subjectData.append('language', lang);
+        });
+      } else {
+        const languagesArray = formData.language.split(',').map(lang => lang.trim());
+        languagesArray.forEach(lang => {
+          subjectData.append('language', lang);
+        });
+      }
+      
+      // Only append video if a new one is selected
+      if (formData.video) {
+        subjectData.append('video', formData.video);
+      }
+      
+      // Get the subject ID and teacher ID
+      const teacherResponse = await fetch(`http://localhost:5000/api/teachers`);
+      const teachers = await teacherResponse.json();
+      
+      if (!teacherResponse.ok || !teachers || teachers.length === 0) {
+        throw new Error('Failed to get teacher data');
+      }
+      
+      const teacherId = teachers[0]._id;
+      const subjectIndex = editingSubject.index;
+      
+      const response = await fetch(`http://localhost:5000/api/subjects/update/${teacherId}/${subjectIndex}`, {
         method: 'PUT',
-        body: courseData
+        body: subjectData
       });
       
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to update course');
+        throw new Error(data.message || 'Failed to update subject');
       }
       
-      setSuccess('Course updated successfully!');
+      setSuccess('Subject updated successfully!');
       
       // Reset form
       resetForm();
       
-      // Refresh courses
-      fetchCourses(tutor._id);
+      // Refresh subjects
+      fetchSubjects(tutor._id);
     } catch (err) {
       setError(err.message || 'Something went wrong with update');
-      console.error('Error updating course:', err);
+      console.error('Error updating subject:', err);
     }
   };
   
-  // New function to handle delete confirmation
-  const handleDeleteClick = (course) => {
-    setCourseToDelete(course);
+  // Handle delete confirmation
+  const handleDeleteClick = (subject, index) => {
+    setSubjectToDelete({...subject, index});
     setShowDeleteModal(true);
   };
   
-  // New function to handle course deletion
-  const handleDeleteCourse = async () => {
+  // Handle subject deletion
+  const handleDeleteSubject = async () => {
     try {
-      console.log('Deleting course:', courseToDelete._id);
+      if (!subjectToDelete || subjectToDelete.index === undefined) {
+        throw new Error('Invalid subject selected for deletion');
+      }
       
-      const response = await fetch(`http://localhost:5000/api/courses/delete/${courseToDelete._id}`, {
+      // Get the teacher ID
+      const teacherResponse = await fetch(`http://localhost:5000/api/teachers`);
+      const teachers = await teacherResponse.json();
+      
+      if (!teacherResponse.ok || !teachers || teachers.length === 0) {
+        throw new Error('Failed to get teacher data');
+      }
+      
+      const teacherId = teachers[0]._id;
+      const subjectIndex = subjectToDelete.index;
+      
+      const response = await fetch(`http://localhost:5000/api/subjects/delete/${teacherId}/${subjectIndex}`, {
         method: 'DELETE',
       });
       
@@ -200,33 +263,31 @@ function CourseManagement() {
       console.log('Delete response status:', response.status);
       
       let data;
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
+      try {
         data = await response.json();
-      } else {
-        const text = await response.text();
-        console.error('Received non-JSON response:', text);
-        throw new Error('Received non-JSON response from server');
+      } catch (e) {
+        console.log('Response is not JSON, possibly empty');
       }
       
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to delete course');
+        throw new Error((data && data.message) || 'Failed to delete subject');
       }
       
-      setSuccess('Course deleted successfully!');
+      setSuccess('Subject deleted successfully!');
       
-      // Add the optimistic UI update here
-      setCourses(prevCourses => prevCourses.filter(course => course._id !== courseToDelete._id));
+      // Update the UI
+      setSubjects(prevSubjects => {
+        const newSubjects = [...prevSubjects];
+        newSubjects.splice(subjectIndex, 1);
+        return newSubjects;
+      });
       
       // Close modal
       setShowDeleteModal(false);
-      setCourseToDelete(null);
-      
-      // Refresh courses (consider removing this since we already updated the UI)
-      // fetchCourses(tutor._id);
+      setSubjectToDelete(null);
     } catch (err) {
       setError(err.message || 'Something went wrong with deletion');
-      console.error('Error deleting course:', err);
+      console.error('Error deleting subject:', err);
       setShowDeleteModal(false);
     }
   };
@@ -245,7 +306,7 @@ function CourseManagement() {
       <DashboardHeader />
       
       <div className="dashboard-content">
-        <h1>Course Management</h1>
+        <h1>Subject Management</h1>
         <p className="welcome-text">Welcome, {tutor.name}</p>
         
         {/* Dashboard Tabs for Navigation */}
@@ -274,25 +335,26 @@ function CourseManagement() {
             className="active"
             onClick={() => navigate('/teacher/CourseManagement')}
           >
-            Course Management
+            Subject Management
           </button>
         </div>
       
         <div className="content-area">
           <section className="add-course">
-            <h2>{editingCourse ? 'Edit Course' : 'Add New Course'}</h2>
+            <h2>{editingSubject ? 'Edit Subject' : 'Add New Subject'}</h2>
             {error && <div className="error-message">{error}</div>}
             {success && <div className="success-message">{success}</div>}
             
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label htmlFor="courseName">Course Name</label>
+                <label htmlFor="subjectName">Subject Name</label>
                 <input
                   type="text"
-                  id="courseName"
-                  name="courseName"
-                  value={formData.courseName}
+                  id="subjectName"
+                  name="subjectName"
+                  value={formData.subjectName}
                   onChange={handleChange}
+                  placeholder="e.g., Mathematics, Physics, Computer Science"
                   required
                 />
               </div>
@@ -316,58 +378,52 @@ function CourseManagement() {
               </div>
               
               <div className="form-group">
-                <label htmlFor="experience">Course Description</label>
+                <label htmlFor="description">Subject Description</label>
                 <textarea
-                  id="experience"
-                  name="experience"
-                  value={formData.experience}
+                  id="description"
+                  name="description"
+                  value={formData.description}
                   onChange={handleChange}
                   required
-                  placeholder="Describe the course content and what students will learn"
+                  placeholder="Describe what students will learn in this subject"
                 />
               </div>
               
               <div className="form-group">
-                <label htmlFor="language">Course Language</label>
-                <select
+                <label htmlFor="language">Languages (comma-separated)</label>
+                <input
+                  type="text"
                   id="language"
                   name="language"
                   value={formData.language}
                   onChange={handleChange}
+                  placeholder="e.g., English, Hindi, Tamil"
                   required
-                >
-                  <option value="">Select Language</option>
-                  <option value="English">English</option>
-                  <option value="Hindi">Hindi</option>
-                  <option value="Tamil">Tamil</option>
-                  <option value="Telugu">Telugu</option>
-                  <option value="Malayalam">Malayalam</option>
-                  <option value="Kannada">Kannada</option>
-                  <option value="Other">Other</option>
-                </select>
+                />
+                <small>Enter languages separated by commas (e.g., English, Hindi)</small>
               </div>
               
               <div className="form-group">
-                <label htmlFor="courseVideo">
-                  {editingCourse ? 'Course Video (Leave empty to keep current video)' : 'Course Video'}
+                <label htmlFor="video">
+                  {editingSubject ? 'Subject Video (Leave empty to keep current video)' : 'Subject Video'}
                 </label>
                 <input
                   type="file"
-                  id="courseVideo"
-                  name="courseVideo"
+                  id="video"
+                  name="video"
                   onChange={handleChange}
                   accept="video/*"
-                  required={!editingCourse}
+                  required={!editingSubject}
                 />
-                <small>Upload a video file for your course</small>
+                <small>Upload a video file for your subject. Maximum size: 100MB</small>
               </div>
               
               <div className="form-buttons">
                 <button type="submit" className="submit-btn">
-                  {editingCourse ? 'Update Course' : 'Add Course'}
+                  {editingSubject ? 'Update Subject' : 'Add Subject'}
                 </button>
                 
-                {editingCourse && (
+                {editingSubject && (
                   <button 
                     type="button" 
                     className="cancel-btn" 
@@ -381,40 +437,58 @@ function CourseManagement() {
           </section>
           
           <section className="course-list">
-            <h2>Your Courses</h2>
-            {courses.length === 0 ? (
-              <p>You haven't added any courses yet.</p>
+            <h2>Your Subjects</h2>
+            {subjects.length === 0 ? (
+              <p>You haven't added any subjects yet.</p>
             ) : (
               <div className="courses-grid">
-                {courses.map(course => (
-                  <div key={course._id} className="course-card">
-                    <h3>{course.courseName}</h3>
-                    <p><strong>Language:</strong> {course.language}</p>
-                    <div className="course-details">
-                      <video controls width="100%">
-                        <source src={`http://localhost:5000/uploads/courses/${course.videoUrl}`} type="video/mp4" />
-                        Your browser does not support the video tag.
-                      </video>
-                      <div className="course-info">
-                        <h4>Course Details:</h4>
-                        <p><strong>Teaching Experience:</strong> {course.experienceYears || 'Not specified'}</p>
-                        <p>{course.experience}</p>
-                        <p className="date-added">Added: {new Date(course.createdAt).toLocaleDateString()}</p>
+                {subjects.map((subject, index) => (
+                  <div key={index} className="course-card">
+                    <h3>{subject.subject}</h3>
+                    <div className="subject-details">
+                      <p><strong>Languages:</strong> {Array.isArray(subject.language) ? subject.language.join(', ') : subject.language}</p>
+                      <p><strong>Trial Students:</strong> {subject.TotalStudentsTrial || 0}</p>
+                      <p><strong>Paid Students:</strong> {subject.TotalStudentsPaid || 0}</p>
+                      <p><strong>Views:</strong> {subject.views || 0}</p>
+                    </div>
+                    
+                    {subject.videos && subject.videos.length > 0 && (
+                      <div className="video-list">
+                        <h4>Videos:</h4>
+                        {subject.videos.map((video, vidIndex) => (
+                          <div key={vidIndex} className="video-item">
+                            <h5>{video.title}</h5>
+                            <video controls width="100%">
+                              <source 
+                                src={`http://localhost:5000/api/stream-video/${encodeURIComponent(video.path)}`} 
+                                type={`video/${video.format}`} 
+                              />
+                              Your browser does not support the video tag.
+                            </video>
+                            <div className="video-details">
+                              <p><strong>Duration:</strong> {Math.floor(video.duration / 60)} min {video.duration % 60} sec</p>
+                              <p><strong>Views:</strong> {video.views || 0}</p>
+                              <p><strong>Format:</strong> {video.format}</p>
+                              <p><strong>Uploaded:</strong> {new Date(video.uploadDate).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="course-actions">
-                        <button 
-                          className="edit-btn" 
-                          onClick={() => handleEditClick(course)}
-                        >
-                          Edit
-                        </button>
-                        <button 
-                          className="delete-btn" 
-                          onClick={() => handleDeleteClick(course)}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                    )}
+                    
+                    <div className="course-actions">
+                      <button 
+                        className="edit-btn" 
+                        onClick={() => handleEditClick(subject, index)}
+                      >
+                        Edit Subject
+                      </button>
+                      <button 
+                        className="delete-btn" 
+                        onClick={() => handleDeleteClick(subject, index)}
+                      >
+                        Delete Subject
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -428,8 +502,8 @@ function CourseManagement() {
           <div className="modal-overlay">
             <div className="modal">
               <h3>Confirm Deletion</h3>
-              <p>Are you sure you want to delete the course "{courseToDelete?.courseName}"?</p>
-              <p className="warning">This action cannot be undone.</p>
+              <p>Are you sure you want to delete the subject "{subjectToDelete?.subject}"?</p>
+              <p className="warning">This action cannot be undone. All videos associated with this subject will also be deleted.</p>
               <div className="modal-buttons">
                 <button 
                   className="cancel-btn" 
@@ -439,7 +513,7 @@ function CourseManagement() {
                 </button>
                 <button 
                   className="delete-confirm-btn" 
-                  onClick={handleDeleteCourse}
+                  onClick={handleDeleteSubject}
                 >
                   Delete
                 </button>

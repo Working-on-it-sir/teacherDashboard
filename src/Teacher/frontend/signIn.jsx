@@ -35,6 +35,7 @@ const SignIn = () => {
     setLoading(true);
     
     try {
+      console.log("Attempting to connect to server at: http://localhost:5000/api/tutor/login");
       const response = await fetch('http://localhost:5000/api/tutor/login', {
         method: 'POST',
         headers: {
@@ -54,8 +55,8 @@ const SignIn = () => {
         setError(data.message || 'Login failed');
       }
     } catch (err) {
-      setError('Server error. Please try again.');
-      console.error(err);
+      console.error("Connection error:", err);
+      setError('Server connection error. Please make sure the server is running at http://localhost:5000');
     } finally {
       setLoading(false);
     }
@@ -76,6 +77,7 @@ const SignIn = () => {
               value={formData.username}
               onChange={handleChange}
               required
+              autoComplete="username"
             />
           </div>
           <div className="form-group">
@@ -87,6 +89,7 @@ const SignIn = () => {
               value={formData.password}
               onChange={handleChange}
               required
+              autoComplete="current-password"
             />
           </div>
           <button 

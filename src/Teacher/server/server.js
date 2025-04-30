@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
+import multer from 'multer';
 import Teacher from './models/teacherModel.js';
 import Tutor from './models/tutor.js';
 import courseRoutes from './routes/courseRoutes.js';
@@ -24,6 +25,34 @@ app.use(express.json());
 
 // Static file serving for uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Configure storage for video uploads
+const videoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Ensure the directory exists
+    const uploadDir = path.join(__dirname, 'uploads', 'videos');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+
+const videoUpload = multer({
+  storage: videoStorage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+  fileFilter: (req, file, cb) => {
+    // Check if file is a video
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed!'), false);
+    }
+  }
+});
 
 // Connect to MongoDB
 mongoose.connect(mongoURI)
@@ -484,6 +513,281 @@ app.post('/api/videos/view/:teacherId/:subjectIndex/:videoIndex', async (req, re
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// ------------------------------------------------
+// Subject Management Routes
+// ------------------------------------------------
+
+// Add new subject with video
+app.post('/api/subjects/add', videoUpload.single('video'), async (req, res) => {
+  try {
+    const { tutorId, subjectName, experienceYears, description } = req.body;
+    
+    // Get language from request body, handling both string and array formats
+    let language = req.body.language;
+    if (!Array.isArray(language)) {
+      language = language.split(',').map(lang => lang.trim());
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'Video file is required' });
+    }
+    
+    // Get the first teacher for demo purposes
+    // In a real app, you would match tutor to a specific teacher
+    const teachers = await Teacher.find();
+    if (!teachers || teachers.length === 0) {
+      return res.status(404).json({ message: 'No teachers found' });
+    }
+    
+    const teacher = teachers[0];
+    
+    // Get video file details
+    const videoPath = req.file.path;
+    const format = path.extname(req.file.originalname).substring(1); // Remove the dot
+    
+    // Create a new subject object
+    const newSubject = {
+      subject: subjectName,
+      description: description,
+      language: language,
+      TotalStudentsTrial: 0,
+      TotalStudentsPaid: 0,
+      views: 0,
+      videos: [
+        {
+          path: videoPath,
+          title: subjectName, // Using subject name as video title, you can customize this
+          duration: 0, // This would be calculated from the actual video in a real app
+          format: format,
+          views: 0,
+          uploadDate: new Date()
+        }
+      ]
+    };
+    
+    // Add the new subject to the teacher's subjects array
+    teacher.subjects.push(newSubject);
+    await teacher.save();
+    
+    res.status(201).json({
+      message: 'Subject added successfully',
+      subject: newSubject
+    });
+  } catch (error) {
+    console.error('Error adding subject:', error);
+    res.status(500).json({ message: 'Failed to add subject', error: error.message });
+  }
+});
+
+// Update a subject
+app.put('/api/subjects/update/:teacherId/:subjectIndex', videoUpload.single('video'), async (req, res) => {
+  try {
+    const { teacherId, subjectIndex } = req.params;
+    const { subjectName, description } = req.body;
+    
+    // Get language from request body, handling both string and array formats
+    let language = req.body.language;
+    if (!Array.isArray(language)) {
+      language = language.split(',').map(lang => lang.trim());
+    }
+    
+    // Find the teacher
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+    
+    // Verify subject exists
+    if (!teacher.subjects[subjectIndex]) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+    
+    // Update the subject properties
+    teacher.subjects[subjectIndex].subject = subjectName;
+    teacher.subjects[subjectIndex].description = description;
+    teacher.subjects[subjectIndex].language = language;
+    
+    // If a new video is uploaded, add it to the videos array
+    if (req.file) {
+      const videoPath = req.file.path;
+      const format = path.extname(req.file.originalname).substring(1);
+      
+      // Add as a new video or replace the first one
+      const newVideo = {
+        path: videoPath,
+        title: subjectName,
+        duration: 0, // This would be calculated from the actual video in a real app
+        format: format,
+        views: 0,
+        uploadDate: new Date()
+      };
+      
+      // Option 1: Add as an additional video
+      teacher.subjects[subjectIndex].videos.push(newVideo);
+      
+      // Option 2: Replace the first video (uncomment if needed)
+      // if (teacher.subjects[subjectIndex].videos.length > 0) {
+      //   // Delete old video file if it exists
+      //   const oldVideoPath = teacher.subjects[subjectIndex].videos[0].path;
+      //   if (fs.existsSync(oldVideoPath)) {
+      //     fs.unlinkSync(oldVideoPath);
+      //   }
+      //   teacher.subjects[subjectIndex].videos[0] = newVideo;
+      // } else {
+      //   teacher.subjects[subjectIndex].videos.push(newVideo);
+      // }
+    }
+    
+    await teacher.save();
+    
+    res.status(200).json({
+      message: 'Subject updated successfully',
+      subject: teacher.subjects[subjectIndex]
+    });
+  } catch (error) {
+    console.error('Error updating subject:', error);
+    res.status(500).json({ message: 'Failed to update subject', error: error.message });
+  }
+});
+
+// Delete a subject
+app.delete('/api/subjects/delete/:teacherId/:subjectIndex', async (req, res) => {
+  try {
+    const { teacherId, subjectIndex } = req.params;
+    
+    // Find the teacher
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+    
+    // Verify subject exists
+    if (!teacher.subjects[subjectIndex]) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+    
+    // Get the subject for deleting video files
+    const subject = teacher.subjects[subjectIndex];
+    
+    // Delete associated video files
+    if (subject.videos && subject.videos.length > 0) {
+      subject.videos.forEach(video => {
+        try {
+          if (fs.existsSync(video.path)) {
+            fs.unlinkSync(video.path);
+            console.log(`Deleted video file: ${video.path}`);
+          }
+        } catch (fsErr) {
+          console.error('Error deleting video file:', fsErr);
+        }
+      });
+    }
+    
+    // Remove the subject from the array
+    teacher.subjects.splice(subjectIndex, 1);
+    await teacher.save();
+    
+    res.status(200).json({ message: 'Subject deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting subject:', error);
+    res.status(500).json({ message: 'Failed to delete subject', error: error.message });
+  }
+});
+
+// Add a new video to an existing subject
+app.post('/api/subjects/:teacherId/:subjectIndex/addVideo', videoUpload.single('video'), async (req, res) => {
+  try {
+    const { teacherId, subjectIndex } = req.params;
+    const { videoTitle } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'Video file is required' });
+    }
+    
+    // Find the teacher
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+    
+    // Verify subject exists
+    if (!teacher.subjects[subjectIndex]) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+    
+    // Get video file details
+    const videoPath = req.file.path;
+    const format = path.extname(req.file.originalname).substring(1);
+    
+    // Create new video object
+    const newVideo = {
+      path: videoPath,
+      title: videoTitle || `Video for ${teacher.subjects[subjectIndex].subject}`,
+      duration: 0, // This would be calculated from the actual video in a real app
+      format: format,
+      views: 0,
+      uploadDate: new Date()
+    };
+    
+    // Add video to the subject
+    teacher.subjects[subjectIndex].videos.push(newVideo);
+    await teacher.save();
+    
+    res.status(201).json({
+      message: 'Video added successfully',
+      video: newVideo
+    });
+  } catch (error) {
+    console.error('Error adding video:', error);
+    res.status(500).json({ message: 'Failed to add video', error: error.message });
+  }
+});
+
+// Delete a video from a subject
+app.delete('/api/subjects/:teacherId/:subjectIndex/videos/:videoIndex', async (req, res) => {
+  try {
+    const { teacherId, subjectIndex, videoIndex } = req.params;
+    
+    // Find the teacher
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+    
+    // Verify subject exists
+    if (!teacher.subjects[subjectIndex]) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+    
+    // Verify video exists
+    if (!teacher.subjects[subjectIndex].videos[videoIndex]) {
+      return res.status(404).json({ message: 'Video not found' });
+    }
+    
+    // Get video path for deletion
+    const videoPath = teacher.subjects[subjectIndex].videos[videoIndex].path;
+    
+    // Delete the video file
+    try {
+      if (fs.existsSync(videoPath)) {
+        fs.unlinkSync(videoPath);
+        console.log(`Deleted video file: ${videoPath}`);
+      }
+    } catch (fsErr) {
+      console.error('Error deleting video file:', fsErr);
+    }
+    
+    // Remove the video from the array
+    teacher.subjects[subjectIndex].videos.splice(videoIndex, 1);
+    await teacher.save();
+    
+    res.status(200).json({ message: 'Video deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting video:', error);
+    res.status(500).json({ message: 'Failed to delete video', error: error.message });
   }
 });
 

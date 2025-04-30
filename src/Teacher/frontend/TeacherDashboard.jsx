@@ -11,6 +11,14 @@ function TeacherDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [videos, setVideos] = useState([]);
+  // New state for video editing
+  const [editingVideo, setEditingVideo] = useState(null);
+  const [showDeleteVideoModal, setShowDeleteVideoModal] = useState(false);
+  const [videoToDelete, setVideoToDelete] = useState(null);
+  const [videoFormData, setVideoFormData] = useState({
+    title: '',
+    video: null
+  });
   
   const navigate = useNavigate();
   
@@ -80,6 +88,108 @@ function TeacherDashboard() {
     } catch (error) {
       console.error('Error fetching teacher data:', error);
       setLoading(false);
+    }
+  };
+
+  // Video management functions
+  const handleEditVideo = (video, subjectIndex, videoIndex) => {
+    setEditingVideo({
+      video,
+      subjectIndex,
+      videoIndex
+    });
+    setVideoFormData({
+      title: video.videoDetails.title,
+      video: null
+    });
+  };
+
+  const handleDeleteVideo = async () => {
+    if (!videoToDelete) return;
+    
+    try {
+      const { subjectIndex, videoIndex } = videoToDelete;
+      
+      // Get the teacher ID
+      if (!teacherData || !teacherData._id) {
+        throw new Error('Teacher data not found');
+      }
+      
+      const response = await fetch(
+        `http://localhost:5000/api/subjects/${teacherData._id}/${subjectIndex}/videos/${videoIndex}`,
+        { method: 'DELETE' }
+      );
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete video');
+      }
+      
+      // Update the UI
+      fetchTeacherData(); // Refresh data
+      
+      // Close the modal
+      setShowDeleteVideoModal(false);
+      setVideoToDelete(null);
+    } catch (error) {
+      console.error('Error deleting video:', error);
+      alert(`Failed to delete video: ${error.message}`);
+    }
+  };
+
+  const handleVideoFormChange = (e) => {
+    const { name, value, files } = e.target;
+    if (files) {
+      setVideoFormData({ ...videoFormData, [name]: files[0] });
+    } else {
+      setVideoFormData({ ...videoFormData, [name]: value });
+    }
+  };
+
+  const handleVideoFormSubmit = async (e) => {
+    e.preventDefault();
+    
+    try {
+      if (!editingVideo) return;
+      
+      const { subjectIndex } = editingVideo;
+      
+      if (!teacherData || !teacherData._id) {
+        throw new Error('Teacher data not found');
+      }
+      
+      const formData = new FormData();
+      formData.append('videoTitle', videoFormData.title);
+      
+      if (videoFormData.video) {
+        formData.append('video', videoFormData.video);
+      } else {
+        throw new Error('Please select a video file');
+      }
+      
+      // Add a new video to the subject
+      const response = await fetch(
+        `http://localhost:5000/api/subjects/${teacherData._id}/${subjectIndex}/addVideo`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update video');
+      }
+      
+      // Update the UI
+      fetchTeacherData(); // Refresh data
+      
+      // Reset form
+      setEditingVideo(null);
+      setVideoFormData({ title: '', video: null });
+    } catch (error) {
+      console.error('Error updating video:', error);
+      alert(`Failed to update video: ${error.message}`);
     }
   };
   
@@ -283,34 +393,145 @@ function TeacherDashboard() {
   };
   
   const renderVideos = () => {
-    if (!videos || videos.length === 0) {
+    if (!teacherData || !teacherData.subjects || teacherData.subjects.length === 0) {
       return <div>No videos available</div>;
     }
+
+    // Group videos by subject
+    const subjectsWithVideos = teacherData.subjects.map((subject, subjectIndex) => ({
+      name: subject.subject,
+      index: subjectIndex,
+      videos: subject.videos.map((video, videoIndex) => ({
+        ...video,
+        videoIndex,
+        subjectIndex
+      }))
+    }));
     
     return (
       <div className="videos-container">
         <h2>Teacher Videos</h2>
-        
-        <div className="videos-grid">
-          {videos.map((video, index) => (
-            <div className="video-card" key={index}>
-              <h3>{video.videoDetails.title}</h3>
-              <div className="video-details">
-                <p><strong>Subject:</strong> {video.subject}</p>
-                <p><strong>Duration:</strong> {Math.floor(video.videoDetails.duration / 60)} min {video.videoDetails.duration % 60} sec</p>
-                <p><strong>Views:</strong> {video.videoDetails.views}</p>
-                <p><strong>Format:</strong> {video.videoDetails.format}</p>
-                <p><strong>Uploaded:</strong> {new Date(video.videoDetails.uploadDate).toLocaleDateString()}</p>
+
+        {/* Video Add/Edit Form */}
+        {editingVideo && (
+          <div className="edit-video-form">
+            <h3>Add New Video</h3>
+            <form onSubmit={handleVideoFormSubmit}>
+              <div className="form-group">
+                <label htmlFor="title">Video Title</label>
+                <input 
+                  type="text" 
+                  id="title" 
+                  name="title" 
+                  value={videoFormData.title} 
+                  onChange={handleVideoFormChange}
+                  required
+                />
               </div>
-              <div className="video-player">
-                <video controls width="100%">
-                  <source src={`http://localhost:5000${video.videoDetails.streamUrl}`} type={`video/${video.videoDetails.format}`} />
-                  Your browser does not support the video tag.
-                </video>
+              <div className="form-group">
+                <label htmlFor="video">Video File</label>
+                <input 
+                  type="file" 
+                  id="video" 
+                  name="video" 
+                  onChange={handleVideoFormChange}
+                  accept="video/*"
+                  required
+                />
+              </div>
+              <div className="form-buttons">
+                <button type="submit" className="submit-btn">Add Video</button>
+                <button 
+                  type="button" 
+                  className="cancel-btn" 
+                  onClick={() => setEditingVideo(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+        
+        {subjectsWithVideos.map((subject) => (
+          <div key={subject.index} className="subject-videos">
+            <div className="subject-header">
+              <h3>{subject.name}</h3>
+              <button 
+                className="add-video-btn" 
+                onClick={() => setEditingVideo({ 
+                  subjectIndex: subject.index, 
+                  videoIndex: -1 // New video
+                })}
+              >
+                Add Video
+              </button>
+            </div>
+            
+            <div className="videos-grid">
+              {subject.videos.map((video) => (
+                <div className="video-card" key={video.videoIndex}>
+                  <h4>{video.title}</h4>
+                  <div className="video-player">
+                    <video controls width="100%">
+                      <source 
+                        src={`http://localhost:5000/api/stream-video/${encodeURIComponent(video.path)}`} 
+                        type={`video/${video.format}`} 
+                      />
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                  <div className="video-details">
+                    <p><strong>Duration:</strong> {Math.floor(video.duration / 60)} min {video.duration % 60} sec</p>
+                    <p><strong>Views:</strong> {video.views || 0}</p>
+                    <p><strong>Format:</strong> {video.format}</p>
+                    <p><strong>Uploaded:</strong> {new Date(video.uploadDate).toLocaleDateString()}</p>
+                  </div>
+                  <div className="video-actions">
+                    <button 
+                      className="delete-video-btn" 
+                      onClick={() => {
+                        setVideoToDelete({ 
+                          subjectIndex: video.subjectIndex, 
+                          videoIndex: video.videoIndex,
+                          title: video.title
+                        });
+                        setShowDeleteVideoModal(true);
+                      }}
+                    >
+                      Delete Video
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteVideoModal && videoToDelete && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Confirm Deletion</h3>
+              <p>Are you sure you want to delete the video "{videoToDelete.title}"?</p>
+              <p className="warning">This action cannot be undone.</p>
+              <div className="modal-buttons">
+                <button 
+                  className="cancel-btn" 
+                  onClick={() => setShowDeleteVideoModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="delete-confirm-btn" 
+                  onClick={handleDeleteVideo}
+                >
+                  Delete
+                </button>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -356,7 +577,7 @@ function TeacherDashboard() {
             className={activeTab === 'course-management' ? 'active' : ''} 
             onClick={() => navigate('/teacher/CourseManagement')}
           >
-            Course Management
+            Subject Management
           </button>
         </div>
         
