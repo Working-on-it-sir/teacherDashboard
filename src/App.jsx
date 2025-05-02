@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom';
-import CourseManagement from './Teacher/frontend/CourseManagement';
+import CourseManagement from './components/CourseManagement';
 
 function App() {
   const [count, setCount] = useState(0)

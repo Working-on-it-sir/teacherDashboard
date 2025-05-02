@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import "../../App.css"; 
+import "../style/App.css"; 
 import DashboardHeader from './DashboardHeader';
 
 function CourseManagement() {
@@ -255,8 +255,14 @@ function CourseManagement() {
       const teacherId = teachers[0]._id;
       const subjectIndex = subjectToDelete.index;
       
+      // Log the request details for debugging
+      console.log(`Attempting to delete subject at index ${subjectIndex} for teacher ${teacherId}`);
+      
       const response = await fetch(`http://localhost:5000/api/subjects/delete/${teacherId}/${subjectIndex}`, {
         method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        }
       });
       
       // Log the response for debugging
@@ -265,6 +271,7 @@ function CourseManagement() {
       let data;
       try {
         data = await response.json();
+        console.log('Response data:', data);
       } catch (e) {
         console.log('Response is not JSON, possibly empty');
       }
